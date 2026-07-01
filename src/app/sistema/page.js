@@ -197,12 +197,24 @@ function Dashboard({ productos, ventas, gastos, importaciones, stockBajo }) {
 }
 
 // ---- INVENTARIO ----
+const UNIDADES_COMUNES = ['und', 'm', 'kg', 'par', 'juego']
+
 function Inventario({ productos, onRefresh }) {
   const [search, setSearch] = useState('')
   const [catFilter, setCatFilter] = useState('')
   const [editando, setEditando] = useState(null)
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
+  const [categorias, setCategorias] = useState([])
+  const [creandoCategoria, setCreandoCategoria] = useState(false)
+  const [nuevaCatNombre, setNuevaCatNombre] = useState('')
+  const [nuevaCatUnidad, setNuevaCatUnidad] = useState('und')
+
+  useEffect(() => { cargarCategorias() }, [])
+  async function cargarCategorias() {
+    const data = await fetch('/api/categorias').then(r => r.json())
+    if (Array.isArray(data)) setCategorias(data)
+  }
 
   const cats = [...new Set(productos.map(p => p.categorias?.nombre).filter(Boolean))]
   const filtrados = productos.filter(p => {
@@ -211,15 +223,61 @@ function Inventario({ productos, onRefresh }) {
     return matchSearch && matchCat
   })
 
+  function abrirNuevo() {
+    setEditando('nuevo')
+    setCreandoCategoria(false)
+    setNuevaCatNombre('')
+    setNuevaCatUnidad('und')
+    setForm({ codigo_legacy: '', descripcion: '', categoria_id: categorias[0]?.id || '', stock: '', stock_minimo: '', precio_compra: '', precio_puesto_depo: '', precio_venta_pen: '', activo: true })
+  }
+
+  function onChangeCategoria(value) {
+    if (value === '__nueva__') {
+      setCreandoCategoria(true)
+      setForm({ ...form, categoria_id: '' })
+    } else {
+      setCreandoCategoria(false)
+      setForm({ ...form, categoria_id: parseInt(value) })
+    }
+  }
+
+  const categoriaSeleccionada = categorias.find(c => c.id === form.categoria_id)
+
   async function guardar() {
+    if (editando === 'nuevo' && (!form.descripcion || !form.codigo_legacy)) {
+      alert('Completa al menos el código y la descripción')
+      return
+    }
+    if (creandoCategoria && !nuevaCatNombre.trim()) {
+      alert('Escribe el nombre de la nueva categoría')
+      return
+    }
     setSaving(true)
+
+    let payload = { ...form }
+
+    if (creandoCategoria) {
+      const nuevaCat = await fetch('/api/categorias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre: nuevaCatNombre.trim(), unidad_venta: nuevaCatUnidad }),
+      }).then(r => r.json())
+      if (!nuevaCat?.id) {
+        setSaving(false)
+        alert('No se pudo crear la categoría, intenta de nuevo')
+        return
+      }
+      payload.categoria_id = nuevaCat.id
+    }
+
     await fetch('/api/productos', {
-      method: 'PUT',
+      method: editando === 'nuevo' ? 'POST' : 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify(payload),
     })
     setSaving(false)
     setEditando(null)
+    cargarCategorias()
     onRefresh()
   }
 
@@ -235,6 +293,7 @@ function Inventario({ productos, onRefresh }) {
             <option value="">Todas las categorías</option>
             {cats.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
+          <BtnSmall onClick={abrirNuevo}>+ Agregar producto</BtnSmall>
         </div>
         <div style={{ maxHeight: 560, overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -264,18 +323,57 @@ function Inventario({ productos, onRefresh }) {
       </Panel>
 
       {editando && (
-        <Modal title="Editar producto" onClose={() => setEditando(null)}>
-          <Campo label="Descripción"><input style={inputStyle} value={form.descripcion || ''} onChange={e => setForm({...form, descripcion: e.target.value})} /></Campo>
+        <Modal title={editando === 'nuevo' ? 'Agregar producto' : 'Editar producto'} onClose={() => setEditando(null)}>
+          <Campo label="Descripción">
+            <input style={inputStyle} placeholder="Ej. Vástago de 60" value={form.descripcion || ''} onChange={e => setForm({...form, descripcion: e.target.value})} />
+          </Campo>
+
+          {editando === 'nuevo' ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <Campo label="Código">
+                <input style={inputStyle} placeholder="Ej. 114" value={form.codigo_legacy || ''} onChange={e => setForm({...form, codigo_legacy: e.target.value})} />
+              </Campo>
+              <Campo label="Categoría">
+                <select style={inputStyle} value={creandoCategoria ? '__nueva__' : (form.categoria_id || '')} onChange={e => onChangeCategoria(e.target.value)}>
+                  {categorias.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                  <option value="__nueva__">+ Crear nueva categoría...</option>
+                </select>
+              </Campo>
+            </div>
+          ) : (
+            <Campo label="Categoría"><input style={inputStyle} disabled value={form.categorias?.nombre || ''} /></Campo>
+          )}
+
+          {creandoCategoria && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, background: '#F7F6F4', borderRadius: 8, padding: 12, marginBottom: 14 }}>
+              <Campo label="Nombre de la nueva categoría">
+                <input style={inputStyle} placeholder="Ej. Rodamientos" value={nuevaCatNombre} onChange={e => setNuevaCatNombre(e.target.value)} />
+              </Campo>
+              <Campo label="Unidad de medida">
+                <select style={inputStyle} value={nuevaCatUnidad} onChange={e => setNuevaCatUnidad(e.target.value)}>
+                  {UNIDADES_COMUNES.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </Campo>
+            </div>
+          )}
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <Campo label="Stock"><input type="number" style={inputStyle} value={form.stock || ''} onChange={e => setForm({...form, stock: e.target.value})} /></Campo>
-            <Campo label="Stock mínimo"><input type="number" style={inputStyle} value={form.stock_minimo || ''} onChange={e => setForm({...form, stock_minimo: e.target.value})} /></Campo>
-            <Campo label="Precio compra (S/)"><input type="number" style={inputStyle} value={form.precio_compra || ''} onChange={e => setForm({...form, precio_compra: e.target.value})} /></Campo>
-            <Campo label="Puesto en depo (S/)"><input type="number" style={inputStyle} value={form.precio_puesto_depo || ''} onChange={e => setForm({...form, precio_puesto_depo: e.target.value})} /></Campo>
-            <Campo label="Precio venta (S/)"><input type="number" style={inputStyle} value={form.precio_venta_pen || ''} onChange={e => setForm({...form, precio_venta_pen: e.target.value})} /></Campo>
+            <Campo label="Stock"><input type="number" style={inputStyle} placeholder="0" value={form.stock || ''} onChange={e => setForm({...form, stock: e.target.value})} /></Campo>
+            <Campo label="Unidad">
+              <input style={inputStyle} disabled
+                value={creandoCategoria ? nuevaCatUnidad : (categoriaSeleccionada?.unidad_venta || form.categorias?.unidad_venta || '')} />
+            </Campo>
+            <Campo label="Stock mínimo (alerta)">
+              <input type="number" style={inputStyle} placeholder="0" value={form.stock_minimo || ''} onChange={e => setForm({...form, stock_minimo: e.target.value})} />
+              <div style={{ fontSize: 10.5, color: GRIS, marginTop: 4 }}>El sistema avisa cuando el stock baja de este número</div>
+            </Campo>
+            <Campo label="Precio compra (S/)"><input type="number" style={inputStyle} placeholder="0.00" value={form.precio_compra || ''} onChange={e => setForm({...form, precio_compra: e.target.value})} /></Campo>
+            <Campo label="Puesto en depo (S/)"><input type="number" style={inputStyle} placeholder="0.00" value={form.precio_puesto_depo || ''} onChange={e => setForm({...form, precio_puesto_depo: e.target.value})} /></Campo>
+            <Campo label="Precio de venta (S/)"><input type="number" style={inputStyle} placeholder="0.00" value={form.precio_venta_pen || ''} onChange={e => setForm({...form, precio_venta_pen: e.target.value})} /></Campo>
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
             <BtnSecondary onClick={() => setEditando(null)}>Cancelar</BtnSecondary>
-            <Btn onClick={guardar} disabled={saving}>{saving ? 'Guardando...' : 'Guardar cambios'}</Btn>
+            <Btn onClick={guardar} disabled={saving}>{saving ? 'Guardando...' : (editando === 'nuevo' ? 'Guardar producto' : 'Guardar cambios')}</Btn>
           </div>
         </Modal>
       )}
@@ -287,8 +385,11 @@ function Inventario({ productos, onRefresh }) {
 function POS({ productos, session, cart, setCart, onRefresh }) {
   const [search, setSearch] = useState('')
   const [cliente, setCliente] = useState({ nombre: '', telefono: '', ruc: '', direccion: '' })
+  const [formaPago, setFormaPago] = useState('')
   const [confirmando, setConfirmando] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  const FORMAS_PAGO = { pos: 'POS / Tarjeta', yape: 'Yape', plin: 'Plin', efectivo: 'Efectivo', transferencia: 'Transferencia' }
 
   const vendibles = productos.filter(p => (p.precio_venta_pen || p.precio_puesto_depo) && p.stock > 0)
   const filtrados = vendibles.filter(p => !search || p.descripcion.toLowerCase().includes(search.toLowerCase()))
@@ -314,6 +415,7 @@ function POS({ productos, session, cart, setCart, onRefresh }) {
       vendedor_id: null,
       sede: session.user.sede || 'Trujillo',
       total_pen: total,
+      forma_pago: formaPago,
     }
     const res = await fetch('/api/ventas', {
       method: 'POST',
@@ -325,6 +427,7 @@ function POS({ productos, session, cart, setCart, onRefresh }) {
     setConfirmando(false)
     setCart([])
     setCliente({ nombre: '', telefono: '', ruc: '', direccion: '' })
+    setFormaPago('')
     alert(`Comprobante ${data.numero_comprobante} generado. Stock actualizado.`)
     onRefresh()
   }
@@ -407,9 +510,17 @@ function POS({ productos, session, cart, setCart, onRefresh }) {
               <span>Total a cobrar</span><span>{fmtPEN(total)}</span>
             </div>
           </div>
+          <div style={{ marginTop: 16 }}>
+            <Campo label="Forma de pago">
+              <select style={inputStyle} value={formaPago} onChange={e => setFormaPago(e.target.value)}>
+                <option value="">Selecciona cómo pagó el cliente...</option>
+                {Object.entries(FORMAS_PAGO).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+              </select>
+            </Campo>
+          </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
             <BtnSecondary onClick={() => setConfirmando(false)}>Seguir editando</BtnSecondary>
-            <Btn onClick={confirmarVenta} disabled={saving}>{saving ? 'Procesando...' : 'Confirmar y generar'}</Btn>
+            <Btn onClick={confirmarVenta} disabled={saving || !formaPago}>{saving ? 'Procesando...' : 'Confirmar y generar'}</Btn>
           </div>
         </Modal>
       )}
@@ -419,6 +530,7 @@ function POS({ productos, session, cart, setCart, onRefresh }) {
 
 // ---- HISTORIAL ----
 function Historial({ ventas }) {
+  const FORMAS_PAGO = { pos: 'POS / Tarjeta', yape: 'Yape', plin: 'Plin', efectivo: 'Efectivo', transferencia: 'Transferencia' }
   return (
     <Panel title="Comprobantes generados">
       {ventas.length === 0
@@ -426,7 +538,7 @@ function Historial({ ventas }) {
         : <div style={{ maxHeight: 560, overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead><tr style={{ background: '#F7F6F4' }}>
-              {['Comprobante','Fecha','Vendedor','Cliente','Total'].map(h => <Th key={h}>{h}</Th>)}
+              {['Comprobante','Fecha','Vendedor','Cliente','Forma de pago','Total'].map(h => <Th key={h}>{h}</Th>)}
             </tr></thead>
             <tbody>
               {ventas.map(v => (
@@ -435,6 +547,7 @@ function Historial({ ventas }) {
                   <Td>{fmtDateTime(v.fecha)}</Td>
                   <Td>{v.usuarios?.nombre || '—'}</Td>
                   <Td>{v.clientes?.nombre || <span style={{ color: '#aaa' }}>Sin registrar</span>}</Td>
+                  <Td>{v.forma_pago ? FORMAS_PAGO[v.forma_pago] || v.forma_pago : <span style={{ color: '#aaa' }}>—</span>}</Td>
                   <Td right><strong>{fmtPEN(v.total_pen)}</strong></Td>
                 </tr>
               ))}
