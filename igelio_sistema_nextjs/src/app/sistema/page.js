@@ -197,13 +197,7 @@ function Dashboard({ productos, ventas, gastos, importaciones, stockBajo }) {
 }
 
 // ---- INVENTARIO ----
-const CATEGORIAS_IGE = [
-  { id: 16, nombre: 'Vástagos' },
-  { id: 17, nombre: 'Accesorios' },
-  { id: 18, nombre: 'Uñas' },
-  { id: 19, nombre: 'Adaptadores' },
-  { id: 20, nombre: 'Equipos Industriales PE' },
-]
+const UNIDADES_COMUNES = ['und', 'm', 'kg', 'par', 'juego']
 
 function Inventario({ productos, onRefresh }) {
   const [search, setSearch] = useState('')
@@ -211,6 +205,16 @@ function Inventario({ productos, onRefresh }) {
   const [editando, setEditando] = useState(null)
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
+  const [categorias, setCategorias] = useState([])
+  const [creandoCategoria, setCreandoCategoria] = useState(false)
+  const [nuevaCatNombre, setNuevaCatNombre] = useState('')
+  const [nuevaCatUnidad, setNuevaCatUnidad] = useState('und')
+
+  useEffect(() => { cargarCategorias() }, [])
+  async function cargarCategorias() {
+    const data = await fetch('/api/categorias').then(r => r.json())
+    if (Array.isArray(data)) setCategorias(data)
+  }
 
   const cats = [...new Set(productos.map(p => p.categorias?.nombre).filter(Boolean))]
   const filtrados = productos.filter(p => {
@@ -221,22 +225,59 @@ function Inventario({ productos, onRefresh }) {
 
   function abrirNuevo() {
     setEditando('nuevo')
-    setForm({ codigo_legacy: '', descripcion: '', categoria_id: CATEGORIAS_IGE[0].id, stock: '', stock_minimo: '', precio_compra: '', precio_puesto_depo: '', precio_venta_pen: '', activo: true })
+    setCreandoCategoria(false)
+    setNuevaCatNombre('')
+    setNuevaCatUnidad('und')
+    setForm({ codigo_legacy: '', descripcion: '', categoria_id: categorias[0]?.id || '', stock: '', stock_minimo: '', precio_compra: '', precio_puesto_depo: '', precio_venta_pen: '', activo: true })
   }
+
+  function onChangeCategoria(value) {
+    if (value === '__nueva__') {
+      setCreandoCategoria(true)
+      setForm({ ...form, categoria_id: '' })
+    } else {
+      setCreandoCategoria(false)
+      setForm({ ...form, categoria_id: parseInt(value) })
+    }
+  }
+
+  const categoriaSeleccionada = categorias.find(c => c.id === form.categoria_id)
 
   async function guardar() {
     if (editando === 'nuevo' && (!form.descripcion || !form.codigo_legacy)) {
       alert('Completa al menos el código y la descripción')
       return
     }
+    if (creandoCategoria && !nuevaCatNombre.trim()) {
+      alert('Escribe el nombre de la nueva categoría')
+      return
+    }
     setSaving(true)
+
+    let payload = { ...form }
+
+    if (creandoCategoria) {
+      const nuevaCat = await fetch('/api/categorias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre: nuevaCatNombre.trim(), unidad_venta: nuevaCatUnidad }),
+      }).then(r => r.json())
+      if (!nuevaCat?.id) {
+        setSaving(false)
+        alert('No se pudo crear la categoría, intenta de nuevo')
+        return
+      }
+      payload.categoria_id = nuevaCat.id
+    }
+
     await fetch('/api/productos', {
       method: editando === 'nuevo' ? 'POST' : 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify(payload),
     })
     setSaving(false)
     setEditando(null)
+    cargarCategorias()
     onRefresh()
   }
 
@@ -282,28 +323,57 @@ function Inventario({ productos, onRefresh }) {
       </Panel>
 
       {editando && (
-        <Modal title={editando === 'nuevo' ? 'Agregar producto nuevo' : 'Editar producto'} onClose={() => setEditando(null)}>
-          {editando === 'nuevo' && (
+        <Modal title={editando === 'nuevo' ? 'Agregar producto' : 'Editar producto'} onClose={() => setEditando(null)}>
+          <Campo label="Descripción">
+            <input style={inputStyle} placeholder="Ej. Vástago de 60" value={form.descripcion || ''} onChange={e => setForm({...form, descripcion: e.target.value})} />
+          </Campo>
+
+          {editando === 'nuevo' ? (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <Campo label="Código"><input style={inputStyle} value={form.codigo_legacy || ''} onChange={e => setForm({...form, codigo_legacy: e.target.value})} /></Campo>
+              <Campo label="Código">
+                <input style={inputStyle} placeholder="Ej. 114" value={form.codigo_legacy || ''} onChange={e => setForm({...form, codigo_legacy: e.target.value})} />
+              </Campo>
               <Campo label="Categoría">
-                <select style={inputStyle} value={form.categoria_id || ''} onChange={e => setForm({...form, categoria_id: parseInt(e.target.value)})}>
-                  {CATEGORIAS_IGE.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                <select style={inputStyle} value={creandoCategoria ? '__nueva__' : (form.categoria_id || '')} onChange={e => onChangeCategoria(e.target.value)}>
+                  {categorias.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                  <option value="__nueva__">+ Crear nueva categoría...</option>
+                </select>
+              </Campo>
+            </div>
+          ) : (
+            <Campo label="Categoría"><input style={inputStyle} disabled value={form.categorias?.nombre || ''} /></Campo>
+          )}
+
+          {creandoCategoria && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, background: '#F7F6F4', borderRadius: 8, padding: 12, marginBottom: 14 }}>
+              <Campo label="Nombre de la nueva categoría">
+                <input style={inputStyle} placeholder="Ej. Rodamientos" value={nuevaCatNombre} onChange={e => setNuevaCatNombre(e.target.value)} />
+              </Campo>
+              <Campo label="Unidad de medida">
+                <select style={inputStyle} value={nuevaCatUnidad} onChange={e => setNuevaCatUnidad(e.target.value)}>
+                  {UNIDADES_COMUNES.map(u => <option key={u} value={u}>{u}</option>)}
                 </select>
               </Campo>
             </div>
           )}
-          <Campo label="Descripción"><input style={inputStyle} value={form.descripcion || ''} onChange={e => setForm({...form, descripcion: e.target.value})} /></Campo>
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <Campo label="Stock"><input type="number" style={inputStyle} value={form.stock || ''} onChange={e => setForm({...form, stock: e.target.value})} /></Campo>
-            <Campo label="Stock mínimo"><input type="number" style={inputStyle} value={form.stock_minimo || ''} onChange={e => setForm({...form, stock_minimo: e.target.value})} /></Campo>
-            <Campo label="Precio compra (S/)"><input type="number" style={inputStyle} value={form.precio_compra || ''} onChange={e => setForm({...form, precio_compra: e.target.value})} /></Campo>
-            <Campo label="Puesto en depo (S/)"><input type="number" style={inputStyle} value={form.precio_puesto_depo || ''} onChange={e => setForm({...form, precio_puesto_depo: e.target.value})} /></Campo>
-            <Campo label="Precio venta (S/)"><input type="number" style={inputStyle} value={form.precio_venta_pen || ''} onChange={e => setForm({...form, precio_venta_pen: e.target.value})} /></Campo>
+            <Campo label="Stock"><input type="number" style={inputStyle} placeholder="0" value={form.stock || ''} onChange={e => setForm({...form, stock: e.target.value})} /></Campo>
+            <Campo label="Unidad">
+              <input style={inputStyle} disabled
+                value={creandoCategoria ? nuevaCatUnidad : (categoriaSeleccionada?.unidad_venta || form.categorias?.unidad_venta || '')} />
+            </Campo>
+            <Campo label="Stock mínimo (alerta)">
+              <input type="number" style={inputStyle} placeholder="0" value={form.stock_minimo || ''} onChange={e => setForm({...form, stock_minimo: e.target.value})} />
+              <div style={{ fontSize: 10.5, color: GRIS, marginTop: 4 }}>El sistema avisa cuando el stock baja de este número</div>
+            </Campo>
+            <Campo label="Precio compra (S/)"><input type="number" style={inputStyle} placeholder="0.00" value={form.precio_compra || ''} onChange={e => setForm({...form, precio_compra: e.target.value})} /></Campo>
+            <Campo label="Puesto en depo (S/)"><input type="number" style={inputStyle} placeholder="0.00" value={form.precio_puesto_depo || ''} onChange={e => setForm({...form, precio_puesto_depo: e.target.value})} /></Campo>
+            <Campo label="Precio de venta (S/)"><input type="number" style={inputStyle} placeholder="0.00" value={form.precio_venta_pen || ''} onChange={e => setForm({...form, precio_venta_pen: e.target.value})} /></Campo>
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
             <BtnSecondary onClick={() => setEditando(null)}>Cancelar</BtnSecondary>
-            <Btn onClick={guardar} disabled={saving}>{saving ? 'Guardando...' : (editando === 'nuevo' ? 'Crear producto' : 'Guardar cambios')}</Btn>
+            <Btn onClick={guardar} disabled={saving}>{saving ? 'Guardando...' : (editando === 'nuevo' ? 'Guardar producto' : 'Guardar cambios')}</Btn>
           </div>
         </Modal>
       )}
