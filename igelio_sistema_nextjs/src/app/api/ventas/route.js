@@ -23,7 +23,7 @@ export async function GET(request) {
 // POST /api/ventas — crear nueva venta y descontar stock
 export async function POST(request) {
   const body = await request.json()
-  const { cliente, items, vendedor_id, sede, total_pen } = body
+  const { cliente, items, vendedor_id, sede, total_pen, forma_pago } = body
 
   // 1. Crear o encontrar cliente
   let cliente_id = null
@@ -58,7 +58,7 @@ export async function POST(request) {
   // 3. Crear la venta
   const { data: venta, error: ventaError } = await supabaseAdmin
     .from('ventas')
-    .insert([{ numero_comprobante: numero, cliente_id, vendedor_id, sede, total_pen }])
+    .insert([{ numero_comprobante: numero, cliente_id, vendedor_id, sede, total_pen, forma_pago }])
     .select()
     .single()
 

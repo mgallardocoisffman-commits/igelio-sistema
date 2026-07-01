@@ -197,6 +197,14 @@ function Dashboard({ productos, ventas, gastos, importaciones, stockBajo }) {
 }
 
 // ---- INVENTARIO ----
+const CATEGORIAS_IGE = [
+  { id: 16, nombre: 'Vástagos' },
+  { id: 17, nombre: 'Accesorios' },
+  { id: 18, nombre: 'Uñas' },
+  { id: 19, nombre: 'Adaptadores' },
+  { id: 20, nombre: 'Equipos Industriales PE' },
+]
+
 function Inventario({ productos, onRefresh }) {
   const [search, setSearch] = useState('')
   const [catFilter, setCatFilter] = useState('')
@@ -211,10 +219,19 @@ function Inventario({ productos, onRefresh }) {
     return matchSearch && matchCat
   })
 
+  function abrirNuevo() {
+    setEditando('nuevo')
+    setForm({ codigo_legacy: '', descripcion: '', categoria_id: CATEGORIAS_IGE[0].id, stock: '', stock_minimo: '', precio_compra: '', precio_puesto_depo: '', precio_venta_pen: '', activo: true })
+  }
+
   async function guardar() {
+    if (editando === 'nuevo' && (!form.descripcion || !form.codigo_legacy)) {
+      alert('Completa al menos el código y la descripción')
+      return
+    }
     setSaving(true)
     await fetch('/api/productos', {
-      method: 'PUT',
+      method: editando === 'nuevo' ? 'POST' : 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form),
     })
@@ -235,6 +252,7 @@ function Inventario({ productos, onRefresh }) {
             <option value="">Todas las categorías</option>
             {cats.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
+          <BtnSmall onClick={abrirNuevo}>+ Agregar producto</BtnSmall>
         </div>
         <div style={{ maxHeight: 560, overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -264,7 +282,17 @@ function Inventario({ productos, onRefresh }) {
       </Panel>
 
       {editando && (
-        <Modal title="Editar producto" onClose={() => setEditando(null)}>
+        <Modal title={editando === 'nuevo' ? 'Agregar producto nuevo' : 'Editar producto'} onClose={() => setEditando(null)}>
+          {editando === 'nuevo' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <Campo label="Código"><input style={inputStyle} value={form.codigo_legacy || ''} onChange={e => setForm({...form, codigo_legacy: e.target.value})} /></Campo>
+              <Campo label="Categoría">
+                <select style={inputStyle} value={form.categoria_id || ''} onChange={e => setForm({...form, categoria_id: parseInt(e.target.value)})}>
+                  {CATEGORIAS_IGE.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                </select>
+              </Campo>
+            </div>
+          )}
           <Campo label="Descripción"><input style={inputStyle} value={form.descripcion || ''} onChange={e => setForm({...form, descripcion: e.target.value})} /></Campo>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <Campo label="Stock"><input type="number" style={inputStyle} value={form.stock || ''} onChange={e => setForm({...form, stock: e.target.value})} /></Campo>
@@ -275,7 +303,7 @@ function Inventario({ productos, onRefresh }) {
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
             <BtnSecondary onClick={() => setEditando(null)}>Cancelar</BtnSecondary>
-            <Btn onClick={guardar} disabled={saving}>{saving ? 'Guardando...' : 'Guardar cambios'}</Btn>
+            <Btn onClick={guardar} disabled={saving}>{saving ? 'Guardando...' : (editando === 'nuevo' ? 'Crear producto' : 'Guardar cambios')}</Btn>
           </div>
         </Modal>
       )}
@@ -287,8 +315,11 @@ function Inventario({ productos, onRefresh }) {
 function POS({ productos, session, cart, setCart, onRefresh }) {
   const [search, setSearch] = useState('')
   const [cliente, setCliente] = useState({ nombre: '', telefono: '', ruc: '', direccion: '' })
+  const [formaPago, setFormaPago] = useState('')
   const [confirmando, setConfirmando] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  const FORMAS_PAGO = { pos: 'POS / Tarjeta', yape: 'Yape', plin: 'Plin', efectivo: 'Efectivo', transferencia: 'Transferencia' }
 
   const vendibles = productos.filter(p => (p.precio_venta_pen || p.precio_puesto_depo) && p.stock > 0)
   const filtrados = vendibles.filter(p => !search || p.descripcion.toLowerCase().includes(search.toLowerCase()))
@@ -314,6 +345,7 @@ function POS({ productos, session, cart, setCart, onRefresh }) {
       vendedor_id: null,
       sede: session.user.sede || 'Trujillo',
       total_pen: total,
+      forma_pago: formaPago,
     }
     const res = await fetch('/api/ventas', {
       method: 'POST',
@@ -325,6 +357,7 @@ function POS({ productos, session, cart, setCart, onRefresh }) {
     setConfirmando(false)
     setCart([])
     setCliente({ nombre: '', telefono: '', ruc: '', direccion: '' })
+    setFormaPago('')
     alert(`Comprobante ${data.numero_comprobante} generado. Stock actualizado.`)
     onRefresh()
   }
@@ -407,9 +440,17 @@ function POS({ productos, session, cart, setCart, onRefresh }) {
               <span>Total a cobrar</span><span>{fmtPEN(total)}</span>
             </div>
           </div>
+          <div style={{ marginTop: 16 }}>
+            <Campo label="Forma de pago">
+              <select style={inputStyle} value={formaPago} onChange={e => setFormaPago(e.target.value)}>
+                <option value="">Selecciona cómo pagó el cliente...</option>
+                {Object.entries(FORMAS_PAGO).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+              </select>
+            </Campo>
+          </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
             <BtnSecondary onClick={() => setConfirmando(false)}>Seguir editando</BtnSecondary>
-            <Btn onClick={confirmarVenta} disabled={saving}>{saving ? 'Procesando...' : 'Confirmar y generar'}</Btn>
+            <Btn onClick={confirmarVenta} disabled={saving || !formaPago}>{saving ? 'Procesando...' : 'Confirmar y generar'}</Btn>
           </div>
         </Modal>
       )}
@@ -419,6 +460,7 @@ function POS({ productos, session, cart, setCart, onRefresh }) {
 
 // ---- HISTORIAL ----
 function Historial({ ventas }) {
+  const FORMAS_PAGO = { pos: 'POS / Tarjeta', yape: 'Yape', plin: 'Plin', efectivo: 'Efectivo', transferencia: 'Transferencia' }
   return (
     <Panel title="Comprobantes generados">
       {ventas.length === 0
@@ -426,7 +468,7 @@ function Historial({ ventas }) {
         : <div style={{ maxHeight: 560, overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead><tr style={{ background: '#F7F6F4' }}>
-              {['Comprobante','Fecha','Vendedor','Cliente','Total'].map(h => <Th key={h}>{h}</Th>)}
+              {['Comprobante','Fecha','Vendedor','Cliente','Forma de pago','Total'].map(h => <Th key={h}>{h}</Th>)}
             </tr></thead>
             <tbody>
               {ventas.map(v => (
@@ -435,6 +477,7 @@ function Historial({ ventas }) {
                   <Td>{fmtDateTime(v.fecha)}</Td>
                   <Td>{v.usuarios?.nombre || '—'}</Td>
                   <Td>{v.clientes?.nombre || <span style={{ color: '#aaa' }}>Sin registrar</span>}</Td>
+                  <Td>{v.forma_pago ? FORMAS_PAGO[v.forma_pago] || v.forma_pago : <span style={{ color: '#aaa' }}>—</span>}</Td>
                   <Td right><strong>{fmtPEN(v.total_pen)}</strong></Td>
                 </tr>
               ))}
