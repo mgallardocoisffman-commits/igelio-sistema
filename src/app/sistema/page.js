@@ -16,6 +16,23 @@ const fmtUSD = n => n == null ? '—' : '$ ' + Number(n).toLocaleString('en-US',
 const fmtDate = d => new Date(d).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })
 const fmtDateTime = d => new Date(d).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
+function descargarCSV(filename, headers, rows) {
+  const esc = v => {
+    const s = v == null ? '' : String(v)
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
+  }
+  const csv = [headers.map(esc).join(','), ...rows.map(r => r.map(esc).join(','))].join('\n')
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 const VISTAS = {
   dashboard: 'Resumen general',
   inventario: 'Inventario',
@@ -136,7 +153,7 @@ export default function SistemaPage() {
         {vistaActual === 'dashboard' && <Dashboard productos={productos} ventas={ventas} gastos={gastos} importaciones={importaciones} stockBajo={stockBajo} />}
         {vistaActual === 'inventario' && <Inventario productos={productos} onRefresh={cargarDatos} />}
         {vistaActual === 'pos' && <POS productos={productos} session={session} cart={cart} setCart={setCart} onRefresh={cargarDatos} />}
-        {vistaActual === 'historial' && <Historial ventas={ventas} />}
+        {vistaActual === 'historial' && <Historial ventas={ventas} onRefresh={cargarDatos} />}
         {vistaActual === 'trazabilidad' && <Trazabilidad importaciones={importaciones} onRefresh={cargarDatos} />}
         {vistaActual === 'gastos' && <Gastos gastos={gastos} session={session} onRefresh={cargarDatos} />}
         {vistaActual === 'reportes' && <Reportes ventas={ventas} gastos={gastos} />}
@@ -197,7 +214,7 @@ function Dashboard({ productos, ventas, gastos, importaciones, stockBajo }) {
 }
 
 // ---- INVENTARIO ----
-const UNIDADES_COMUNES = ['und', 'm', 'kg', 'par', 'juego']
+const UNIDADES_COMUNES = ['und', 'm', 'kg', 'par', 'juego', 'servicio']
 
 function Inventario({ productos, onRefresh }) {
   const [search, setSearch] = useState('')
@@ -529,16 +546,62 @@ function POS({ productos, session, cart, setCart, onRefresh }) {
 }
 
 // ---- HISTORIAL ----
-function Historial({ ventas }) {
+function Historial({ ventas, onRefresh }) {
   const FORMAS_PAGO = { pos: 'POS / Tarjeta', yape: 'Yape', plin: 'Plin', efectivo: 'Efectivo', transferencia: 'Transferencia' }
+  const [eliminando, setEliminando] = useState(null)
+  const [passwordInput, setPasswordInput] = useState('')
+  const [errorPass, setErrorPass] = useState('')
+  const [borrando, setBorrando] = useState(false)
+
+  function exportar() {
+    descargarCSV(
+      `ventas_${new Date().toISOString().slice(0,10)}.csv`,
+      ['Comprobante', 'Fecha', 'Vendedor', 'Cliente', 'Forma de pago', 'Total'],
+      ventas.map(v => [
+        v.numero_comprobante,
+        fmtDateTime(v.fecha),
+        v.usuarios?.nombre || '',
+        v.clientes?.nombre || '',
+        v.forma_pago ? (FORMAS_PAGO[v.forma_pago] || v.forma_pago) : '',
+        v.total_pen,
+      ])
+    )
+  }
+
+  async function confirmarEliminar() {
+    if (!passwordInput) { setErrorPass('Ingresa la contraseña'); return }
+    setBorrando(true)
+    setErrorPass('')
+    const res = await fetch('/api/ventas', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: eliminando, password: passwordInput }),
+    })
+    setBorrando(false)
+    if (res.status === 401) {
+      setErrorPass('Contraseña incorrecta')
+      return
+    }
+    if (!res.ok) {
+      setErrorPass('No se pudo eliminar, intenta de nuevo')
+      return
+    }
+    setEliminando(null)
+    setPasswordInput('')
+    onRefresh()
+  }
+
   return (
     <Panel title="Comprobantes generados">
+      <div style={{ padding: '12px 18px', borderBottom: `1px solid ${BORDE}`, display: 'flex', justifyContent: 'flex-end' }}>
+        <BtnSmall onClick={exportar}>⬇ Descargar CSV</BtnSmall>
+      </div>
       {ventas.length === 0
         ? <div style={{ padding: 30, textAlign: 'center', color: GRIS }}>Aún no hay ventas registradas</div>
         : <div style={{ maxHeight: 560, overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead><tr style={{ background: '#F7F6F4' }}>
-              {['Comprobante','Fecha','Vendedor','Cliente','Forma de pago','Total'].map(h => <Th key={h}>{h}</Th>)}
+              {['Comprobante','Fecha','Vendedor','Cliente','Forma de pago','Total',''].map(h => <Th key={h}>{h}</Th>)}
             </tr></thead>
             <tbody>
               {ventas.map(v => (
@@ -549,12 +612,29 @@ function Historial({ ventas }) {
                   <Td>{v.clientes?.nombre || <span style={{ color: '#aaa' }}>Sin registrar</span>}</Td>
                   <Td>{v.forma_pago ? FORMAS_PAGO[v.forma_pago] || v.forma_pago : <span style={{ color: '#aaa' }}>—</span>}</Td>
                   <Td right><strong>{fmtPEN(v.total_pen)}</strong></Td>
+                  <Td><span onClick={() => { setEliminando(v.id); setPasswordInput(''); setErrorPass('') }} style={{ cursor: 'pointer', color: ROJO, fontSize: 11.5, fontWeight: 'bold' }}>Eliminar</span></Td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       }
+
+      {eliminando && (
+        <Modal title="Eliminar venta" onClose={() => setEliminando(null)}>
+          <p style={{ fontSize: 13, color: GRIS, marginTop: 0 }}>
+            Esta acción elimina el comprobante y sus ítems, y devuelve el stock vendido al inventario. No se puede deshacer.
+          </p>
+          <Campo label="Contraseña especial de eliminación">
+            <input type="password" style={inputStyle} value={passwordInput} onChange={e => setPasswordInput(e.target.value)} placeholder="Contraseña" autoFocus />
+          </Campo>
+          {errorPass && <div style={{ color: ROJO, fontSize: 12.5, marginTop: -8, marginBottom: 10 }}>{errorPass}</div>}
+          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+            <BtnSecondary onClick={() => setEliminando(null)}>Cancelar</BtnSecondary>
+            <Btn onClick={confirmarEliminar} disabled={borrando} style={{ background: ROJO }}>{borrando ? 'Eliminando...' : 'Eliminar definitivamente'}</Btn>
+          </div>
+        </Modal>
+      )}
     </Panel>
   )
 }
@@ -674,7 +754,8 @@ function Trazabilidad({ importaciones, onRefresh }) {
 
 // ---- GASTOS ----
 function Gastos({ gastos, session, onRefresh }) {
-  const [form, setForm] = useState({ descripcion: '', monto: '', sede: 'Trujillo', fecha: new Date().toISOString().slice(0,10) })
+  const formInicial = { descripcion: '', monto: '', sede: 'Trujillo', fecha: new Date().toISOString().slice(0,10), realizado_por: '', para_que: '', referencia: '', notas: '' }
+  const [form, setForm] = useState(formInicial)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
 
@@ -683,7 +764,7 @@ function Gastos({ gastos, session, onRefresh }) {
   const totalLima = gastos.filter(g => g.sede === 'Lima').reduce((s, g) => s + g.monto, 0)
 
   async function guardar() {
-    if (!form.descripcion || !form.monto) { alert('Completa descripción y monto'); return }
+    if (!form.descripcion || !form.monto) { alert('Completa descripción (motivo) y monto'); return }
     setSaving(true)
     await fetch('/api/gastos', {
       method: 'POST',
@@ -692,8 +773,16 @@ function Gastos({ gastos, session, onRefresh }) {
     })
     setSaving(false)
     setShowForm(false)
-    setForm({ descripcion: '', monto: '', sede: 'Trujillo', fecha: new Date().toISOString().slice(0,10) })
+    setForm(formInicial)
     onRefresh()
+  }
+
+  function exportar() {
+    descargarCSV(
+      `gastos_${new Date().toISOString().slice(0,10)}.csv`,
+      ['Fecha', 'Descripción/Motivo', 'Realizado por', 'Para qué', 'Referencia', 'Notas', 'Sede', 'Monto'],
+      gastos.map(g => [fmtDate(g.fecha), g.descripcion, g.realizado_por || '', g.para_que || '', g.referencia || '', g.notas || '', g.sede, g.monto])
+    )
   }
 
   return (
@@ -704,20 +793,31 @@ function Gastos({ gastos, session, onRefresh }) {
         <KPI v={fmtPEN(totalLima)} l="Gastos Lima" />
       </div>
       <Panel>
-        <div style={{ padding: '14px 18px', borderBottom: `1px solid ${BORDE}`, display: 'flex', justifyContent: 'flex-end' }}>
+        <div style={{ padding: '14px 18px', borderBottom: `1px solid ${BORDE}`, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <BtnSmall onClick={exportar}>⬇ Descargar CSV</BtnSmall>
           <BtnSmall onClick={() => setShowForm(true)}>+ Registrar gasto</BtnSmall>
         </div>
         {gastos.length === 0
           ? <div style={{ padding: 30, textAlign: 'center', color: GRIS }}>Aún no hay gastos registrados</div>
           : <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead><tr style={{ background: '#F7F6F4' }}>
-              {['Fecha','Descripción','Sede','Monto'].map(h => <Th key={h}>{h}</Th>)}
+              {['Fecha','Descripción / Motivo','Realizado por','Sede','Monto'].map(h => <Th key={h}>{h}</Th>)}
             </tr></thead>
             <tbody>
               {[...gastos].reverse().map(g => (
                 <tr key={g.id}>
                   <Td>{fmtDate(g.fecha)}</Td>
-                  <Td>{g.descripcion}</Td>
+                  <Td>
+                    {g.descripcion}
+                    {(g.para_que || g.referencia) && (
+                      <div style={{ fontSize: 11, color: GRIS, marginTop: 2 }}>
+                        {g.para_que && <span>Para: {g.para_que}</span>}
+                        {g.para_que && g.referencia && <span> · </span>}
+                        {g.referencia && <span>Ref: {g.referencia}</span>}
+                      </div>
+                    )}
+                  </Td>
+                  <Td>{g.realizado_por || <span style={{ color: '#aaa' }}>—</span>}</Td>
                   <Td><span style={{ fontSize: 11, color: GRIS }}>{g.sede}</span></Td>
                   <Td right><strong>{fmtPEN(g.monto)}</strong></Td>
                 </tr>
@@ -728,9 +828,17 @@ function Gastos({ gastos, session, onRefresh }) {
       </Panel>
       {showForm && (
         <Modal title="Registrar gasto" onClose={() => setShowForm(false)}>
-          <Campo label="Descripción"><input style={inputStyle} value={form.descripcion} onChange={e => setForm({...form, descripcion: e.target.value})} placeholder="Ej. Alquiler local Trujillo" /></Campo>
+          <Campo label="Motivo del gasto"><input style={inputStyle} value={form.descripcion} onChange={e => setForm({...form, descripcion: e.target.value})} placeholder="Ej. Reparación de compresora" /></Campo>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Campo label="Quién realizó el gasto"><input style={inputStyle} value={form.realizado_por} onChange={e => setForm({...form, realizado_por: e.target.value})} placeholder="Nombre" /></Campo>
+            <Campo label="Para qué se realizó"><input style={inputStyle} value={form.para_que} onChange={e => setForm({...form, para_que: e.target.value})} placeholder="Ej. Mantenimiento equipo X" /></Campo>
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <Campo label="Monto (S/)"><input type="number" style={inputStyle} value={form.monto} onChange={e => setForm({...form, monto: e.target.value})} placeholder="0.00" /></Campo>
+            <Campo label="Fecha"><input type="date" style={inputStyle} value={form.fecha} onChange={e => setForm({...form, fecha: e.target.value})} /></Campo>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Campo label="Referencia"><input style={inputStyle} value={form.referencia} onChange={e => setForm({...form, referencia: e.target.value})} placeholder="N° comprobante, etc." /></Campo>
             <Campo label="Sede">
               <select style={inputStyle} value={form.sede} onChange={e => setForm({...form, sede: e.target.value})}>
                 <option value="Trujillo">Trujillo</option>
@@ -739,7 +847,9 @@ function Gastos({ gastos, session, onRefresh }) {
               </select>
             </Campo>
           </div>
-          <Campo label="Fecha"><input type="date" style={inputStyle} value={form.fecha} onChange={e => setForm({...form, fecha: e.target.value})} /></Campo>
+          <Campo label="Notas / detalle (opcional)">
+            <textarea style={{...inputStyle, minHeight: 70, resize: 'vertical'}} value={form.notas} onChange={e => setForm({...form, notas: e.target.value})} placeholder="Detalle libre — útil para historial de mantenimiento, por ejemplo" />
+          </Campo>
           <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
             <BtnSecondary onClick={() => setShowForm(false)}>Cancelar</BtnSecondary>
             <Btn onClick={guardar} disabled={saving}>{saving ? 'Guardando...' : 'Guardar gasto'}</Btn>
@@ -774,6 +884,12 @@ function Reportes({ ventas, gastos }) {
     })
   })
 
+  function exportarVentas() {
+    descargarCSV(`reporte_ventas_${new Date().toISOString().slice(0,10)}.csv`,
+      ['Producto', 'Cantidad vendida', 'Total vendido'],
+      Object.values(porProducto).sort((a,b) => b.total - a.total).map(p => [p.descripcion, p.cantidad, p.total]))
+  }
+
   return (
     <div>
       <Panel>
@@ -783,6 +899,7 @@ function Reportes({ ventas, gastos }) {
           <label style={{ fontSize: 11.5, color: GRIS }}>Hasta</label>
           <input type="date" value={hasta} onChange={e => setHasta(e.target.value)} style={{ fontFamily: 'Arial', fontSize: 12.5, padding: '6px 9px', border: `1px solid ${BORDE}`, borderRadius: 6 }} />
           <BtnSmall onClick={() => { setDesde(''); setHasta('') }}>Limpiar</BtnSmall>
+          <div style={{ marginLeft: 'auto' }}><BtnSmall onClick={exportarVentas}>⬇ Descargar CSV</BtnSmall></div>
         </div>
       </Panel>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 22 }}>
