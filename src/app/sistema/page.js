@@ -290,12 +290,17 @@ function Inventario({ productos, onRefresh }) {
       payload.categoria_id = nuevaCat.id
     }
 
-    await fetch('/api/productos', {
+    const res = await fetch('/api/productos', {
       method: editando === 'nuevo' ? 'POST' : 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
     setSaving(false)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      alert('No se pudo guardar el producto: ' + (err.error || 'Error desconocido'))
+      return
+    }
     setEditando(null)
     cargarCategorias()
     onRefresh()
@@ -412,7 +417,7 @@ function POS({ productos, session, cart, setCart, onRefresh }) {
   const FORMAS_PAGO = { pos: 'POS / Tarjeta', yape: 'Yape', plin: 'Plin', efectivo: 'Efectivo', transferencia: 'Transferencia' }
 
   const vendibles = productos.filter(p => (p.precio_venta_pen || p.precio_puesto_depo) && p.stock > 0)
-  const filtrados = vendibles.filter(p => !search || p.descripcion.toLowerCase().includes(search.toLowerCase()))
+  const filtrados = vendibles.filter(p => !search || p.descripcion.toLowerCase().includes(search.toLowerCase()) || String(p.codigo_legacy).includes(search))
 
   function addToCart(p) {
     const precio = p.precio_venta_pen || p.precio_puesto_depo
@@ -444,6 +449,10 @@ function POS({ productos, session, cart, setCart, onRefresh }) {
     })
     const data = await res.json()
     setSaving(false)
+    if (!res.ok) {
+      alert('No se pudo generar la venta: ' + (data.error || 'Error desconocido'))
+      return
+    }
     setConfirmando(false)
     setCart([])
     setCliente({ nombre: '', telefono: '', ruc: '', direccion: '' })
@@ -761,6 +770,10 @@ function Gastos({ gastos, session, onRefresh }) {
   const [form, setForm] = useState(formInicial)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [eliminando, setEliminando] = useState(null)
+  const [passwordInput, setPasswordInput] = useState('')
+  const [errorPass, setErrorPass] = useState('')
+  const [borrando, setBorrando] = useState(false)
 
   const totalGeneral = gastos.reduce((s, g) => s + g.monto, 0)
   const totalTrujillo = gastos.filter(g => g.sede === 'Trujillo').reduce((s, g) => s + g.monto, 0)
@@ -769,14 +782,36 @@ function Gastos({ gastos, session, onRefresh }) {
   async function guardar() {
     if (!form.descripcion || !form.monto) { alert('Completa descripción (motivo) y monto'); return }
     setSaving(true)
-    await fetch('/api/gastos', {
+    const res = await fetch('/api/gastos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...form, monto: parseFloat(form.monto) }),
     })
     setSaving(false)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      alert('No se pudo guardar el gasto: ' + (err.error || 'Error desconocido'))
+      return
+    }
     setShowForm(false)
     setForm(formInicial)
+    onRefresh()
+  }
+
+  async function confirmarEliminar() {
+    if (!passwordInput) { setErrorPass('Ingresa la contraseña'); return }
+    setBorrando(true)
+    setErrorPass('')
+    const res = await fetch('/api/gastos', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: eliminando, password: passwordInput }),
+    })
+    setBorrando(false)
+    if (res.status === 401) { setErrorPass('Contraseña incorrecta'); return }
+    if (!res.ok) { setErrorPass('No se pudo eliminar, intenta de nuevo'); return }
+    setEliminando(null)
+    setPasswordInput('')
     onRefresh()
   }
 
@@ -804,7 +839,7 @@ function Gastos({ gastos, session, onRefresh }) {
           ? <div style={{ padding: 30, textAlign: 'center', color: GRIS }}>Aún no hay gastos registrados</div>
           : <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead><tr style={{ background: '#F7F6F4' }}>
-              {['Fecha','Descripción / Motivo','Realizado por','Sede','Monto'].map(h => <Th key={h}>{h}</Th>)}
+              {['Fecha','Descripción / Motivo','Realizado por','Sede','Monto',''].map(h => <Th key={h}>{h}</Th>)}
             </tr></thead>
             <tbody>
               {[...gastos].reverse().map(g => (
@@ -823,12 +858,29 @@ function Gastos({ gastos, session, onRefresh }) {
                   <Td>{g.realizado_por || <span style={{ color: '#aaa' }}>—</span>}</Td>
                   <Td><span style={{ fontSize: 11, color: GRIS }}>{g.sede}</span></Td>
                   <Td right><strong>{fmtPEN(g.monto)}</strong></Td>
+                  <Td><span onClick={() => { setEliminando(g.id); setPasswordInput(''); setErrorPass('') }} style={{ cursor: 'pointer', color: ROJO, fontSize: 11.5, fontWeight: 'bold' }}>Eliminar</span></Td>
                 </tr>
               ))}
             </tbody>
           </table>
         }
       </Panel>
+      {eliminando && (
+        <Modal title="Eliminar gasto" onClose={() => setEliminando(null)}>
+          <p style={{ fontSize: 13, color: GRIS, marginTop: 0 }}>
+            Esta acción elimina el gasto de forma permanente. No se puede deshacer.
+          </p>
+          <Campo label="Contraseña especial de eliminación">
+            <input type="password" style={inputStyle} value={passwordInput} onChange={e => setPasswordInput(e.target.value)} placeholder="Contraseña" autoFocus />
+          </Campo>
+          {errorPass && <div style={{ color: ROJO, fontSize: 12.5, marginTop: -8, marginBottom: 10 }}>{errorPass}</div>}
+          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+            <BtnSecondary onClick={() => setEliminando(null)}>Cancelar</BtnSecondary>
+            <Btn onClick={confirmarEliminar} disabled={borrando} style={{ background: ROJO }}>{borrando ? 'Eliminando...' : 'Eliminar definitivamente'}</Btn>
+          </div>
+        </Modal>
+      )}
+
       {showForm && (
         <Modal title="Registrar gasto" onClose={() => setShowForm(false)}>
           <Campo label="Motivo del gasto"><input style={inputStyle} value={form.descripcion} onChange={e => setForm({...form, descripcion: e.target.value})} placeholder="Ej. Reparación de compresora" /></Campo>
@@ -944,12 +996,17 @@ function Usuarios({ usuarios, onRefresh }) {
 
   async function guardar() {
     setSaving(true)
-    await fetch('/api/usuarios', {
+    const res = await fetch('/api/usuarios', {
       method: editando === 'nuevo' ? 'POST' : 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form),
     })
     setSaving(false)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      alert('No se pudo guardar el usuario: ' + (err.error || 'Error desconocido'))
+      return
+    }
     setEditando(null)
     onRefresh()
   }
