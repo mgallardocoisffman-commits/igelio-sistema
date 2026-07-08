@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
+import Cotizaciones from './Cotizaciones'
 
 const NARANJA = '#E8581A'
 const NEGRO = '#111111'
@@ -35,6 +36,7 @@ function descargarCSV(filename, headers, rows) {
 
 const VISTAS = {
   dashboard: 'Resumen general',
+  cotizaciones: 'Cotizaciones',
   inventario: 'Inventario',
   pos: 'Ventas / POS',
   historial: 'Historial de ventas',
@@ -151,6 +153,7 @@ export default function SistemaPage() {
         </div>
 
         {vistaActual === 'dashboard' && <Dashboard productos={productos} ventas={ventas} gastos={gastos} importaciones={importaciones} stockBajo={stockBajo} />}
+        {vistaActual === 'cotizaciones' && <Cotizaciones session={session} productos={productos} onRefreshVentas={cargarDatos} />}
         {vistaActual === 'inventario' && <Inventario productos={productos} onRefresh={cargarDatos} />}
         {vistaActual === 'pos' && <POS productos={productos} session={session} cart={cart} setCart={setCart} onRefresh={cargarDatos} />}
         {vistaActual === 'historial' && <Historial ventas={ventas} onRefresh={cargarDatos} />}
