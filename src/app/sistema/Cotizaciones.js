@@ -89,13 +89,16 @@ export default function Cotizaciones({ session, productos, onRefreshVentas }) {
                     <Td><Badge color={ESTADO_COLORS[c.estado] || GRIS}>{ESTADO_LABELS[c.estado] || c.estado}</Badge></Td>
                     <Td right><strong>{fmtPEN(c.total_pen)}</strong></Td>
                     <Td>
-                      {c.estado === 'registrado' && (
-                        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                          <span onClick={() => { setConvirtiendo(c.id); setFormaPagoConvertir('') }} style={{ cursor: 'pointer', color: VERDE, fontSize: 11.5, fontWeight: 'bold' }}>Generar venta</span>
-                          <span onClick={() => anular(c.id)} style={{ cursor: 'pointer', color: ROJO, fontSize: 11.5, fontWeight: 'bold' }}>Anular</span>
-                        </div>
-                      )}
-                      {c.estado === 'convertida' && <span style={{ fontSize: 11, color: GRIS }}>Ya generó venta</span>}
+                      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', alignItems: 'center' }}>
+                        <span onClick={() => window.open(`/comprobante?tipo=cotizacion&id=${c.id}`, '_blank')} style={{ cursor: 'pointer', color: '#1D4E89', fontSize: 11.5, fontWeight: 'bold' }}>Descargar</span>
+                        {c.estado === 'registrado' && (
+                          <>
+                            <span onClick={() => { setConvirtiendo(c.id); setFormaPagoConvertir('') }} style={{ cursor: 'pointer', color: VERDE, fontSize: 11.5, fontWeight: 'bold' }}>Generar venta</span>
+                            <span onClick={() => anular(c.id)} style={{ cursor: 'pointer', color: ROJO, fontSize: 11.5, fontWeight: 'bold' }}>Anular</span>
+                          </>
+                        )}
+                        {c.estado === 'convertida' && <span style={{ fontSize: 11, color: GRIS }}>Ya generó venta</span>}
+                      </div>
                     </Td>
                   </tr>
                 ))}

@@ -229,6 +229,10 @@ function Inventario({ productos, onRefresh }) {
   const [creandoCategoria, setCreandoCategoria] = useState(false)
   const [nuevaCatNombre, setNuevaCatNombre] = useState('')
   const [nuevaCatUnidad, setNuevaCatUnidad] = useState('und')
+  const [eliminando, setEliminando] = useState(null)
+  const [passwordInput, setPasswordInput] = useState('')
+  const [errorPass, setErrorPass] = useState('')
+  const [borrando, setBorrando] = useState(false)
 
   useEffect(() => { cargarCategorias() }, [])
   async function cargarCategorias() {
@@ -306,6 +310,23 @@ function Inventario({ productos, onRefresh }) {
     onRefresh()
   }
 
+  async function confirmarEliminar() {
+    if (!passwordInput) { setErrorPass('Ingresa la contraseña'); return }
+    setBorrando(true)
+    setErrorPass('')
+    const res = await fetch('/api/productos', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: eliminando, password: passwordInput }),
+    })
+    setBorrando(false)
+    if (res.status === 401) { setErrorPass('Contraseña incorrecta'); return }
+    if (!res.ok) { setErrorPass('No se pudo eliminar, intenta de nuevo'); return }
+    setEliminando(null)
+    setPasswordInput('')
+    onRefresh()
+  }
+
   return (
     <div>
       <Panel>
@@ -323,7 +344,7 @@ function Inventario({ productos, onRefresh }) {
         <div style={{ maxHeight: 560, overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead><tr style={{ background: '#F7F6F4' }}>
-              {['Código','Descripción','Categoría','Stock','Stock mín.','Precio compra','Puesto en depo','Estado',''].map(h => <Th key={h}>{h}</Th>)}
+              {['Código','Descripción','Categoría','Stock','Stock mín.','Precio compra','Puesto en depo','Estado','',''].map(h => <Th key={h}>{h}</Th>)}
             </tr></thead>
             <tbody>
               {filtrados.map(p => {
@@ -339,6 +360,7 @@ function Inventario({ productos, onRefresh }) {
                     <Td right>{fmtPEN(p.precio_puesto_depo)}</Td>
                     <Td>{bajo ? <Badge color={ROJO}>Stock bajo</Badge> : (p.precio_compra ? <Badge color={VERDE}>OK</Badge> : <Badge color={AMBER}>Pendiente</Badge>)}</Td>
                     <Td><span onClick={() => { setEditando(p.id); setForm(p) }} style={{ cursor: 'pointer', color: NARANJA, fontSize: 11.5, fontWeight: 'bold' }}>Editar</span></Td>
+                    <Td><span onClick={() => { setEliminando(p.id); setPasswordInput(''); setErrorPass('') }} style={{ cursor: 'pointer', color: ROJO, fontSize: 11.5, fontWeight: 'bold' }}>Eliminar</span></Td>
                   </tr>
                 )
               })}
@@ -346,6 +368,22 @@ function Inventario({ productos, onRefresh }) {
           </table>
         </div>
       </Panel>
+
+      {eliminando && (
+        <Modal title="Eliminar producto" onClose={() => setEliminando(null)}>
+          <p style={{ fontSize: 13, color: GRIS, marginTop: 0 }}>
+            Esta acción elimina el producto del inventario de forma permanente. No se puede deshacer.
+          </p>
+          <Campo label="Contraseña especial">
+            <input type="password" style={inputStyle} value={passwordInput} onChange={e => setPasswordInput(e.target.value)} placeholder="Contraseña" autoFocus />
+          </Campo>
+          {errorPass && <div style={{ color: ROJO, fontSize: 12.5, marginTop: -8, marginBottom: 10 }}>{errorPass}</div>}
+          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+            <BtnSecondary onClick={() => setEliminando(null)}>Cancelar</BtnSecondary>
+            <Btn onClick={confirmarEliminar} disabled={borrando} style={{ background: ROJO }}>{borrando ? 'Eliminando...' : 'Eliminar definitivamente'}</Btn>
+          </div>
+        </Modal>
+      )}
 
       {editando && (
         <Modal title={editando === 'nuevo' ? 'Agregar producto' : 'Editar producto'} onClose={() => setEditando(null)}>
@@ -413,6 +451,7 @@ function POS({ productos, session, cart, setCart, onRefresh }) {
   const [formaPago, setFormaPago] = useState('')
   const [confirmando, setConfirmando] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [ventaGenerada, setVentaGenerada] = useState(null)
 
   const FORMAS_PAGO = { pos: 'POS / Tarjeta', yape: 'Yape', plin: 'Plin', efectivo: 'Efectivo', transferencia: 'Transferencia' }
 
@@ -457,7 +496,7 @@ function POS({ productos, session, cart, setCart, onRefresh }) {
     setCart([])
     setCliente({ nombre: '', telefono: '', ruc: '', direccion: '' })
     setFormaPago('')
-    alert(`Comprobante ${data.numero_comprobante} generado. Stock actualizado.`)
+    setVentaGenerada(data)
     onRefresh()
   }
 
@@ -553,6 +592,25 @@ function POS({ productos, session, cart, setCart, onRefresh }) {
           </div>
         </Modal>
       )}
+
+      {ventaGenerada && (
+        <Modal title="Venta generada" onClose={() => setVentaGenerada(null)}>
+          <p style={{ fontSize: 14 }}>
+            Comprobante <strong>{ventaGenerada.numero_comprobante}</strong> generado correctamente. Stock actualizado.
+          </p>
+          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+            <BtnSecondary onClick={() => window.open(`/comprobante?tipo=venta&id=${ventaGenerada.id}`, '_blank')}>
+              Descargar comprobante
+            </BtnSecondary>
+            <Btn onClick={() => window.open(`/comprobante?tipo=venta&id=${ventaGenerada.id}`, '_blank')}>
+              Imprimir comprobante
+            </Btn>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <BtnSecondary onClick={() => setVentaGenerada(null)}>Cerrar</BtnSecondary>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
@@ -624,7 +682,7 @@ function Historial({ ventas, onRefresh }) {
                   <Td>{v.clientes?.nombre || <span style={{ color: '#aaa' }}>Sin registrar</span>}</Td>
                   <Td>{v.forma_pago ? FORMAS_PAGO[v.forma_pago] || v.forma_pago : <span style={{ color: '#aaa' }}>—</span>}</Td>
                   <Td right><strong>{fmtPEN(v.total_pen)}</strong></Td>
-                  <Td><span onClick={() => { setEliminando(v.id); setPasswordInput(''); setErrorPass('') }} style={{ cursor: 'pointer', color: ROJO, fontSize: 11.5, fontWeight: 'bold' }}>Eliminar</span></Td>
+                  <Td><span onClick={() => { setEliminando(v.id); setPasswordInput(''); setErrorPass('') }} style={{ cursor: 'pointer', color: ROJO, fontSize: 11.5, fontWeight: 'bold' }}>Revertir</span></Td>
                 </tr>
               ))}
             </tbody>
@@ -633,17 +691,17 @@ function Historial({ ventas, onRefresh }) {
       }
 
       {eliminando && (
-        <Modal title="Eliminar venta" onClose={() => setEliminando(null)}>
+        <Modal title="Revertir venta" onClose={() => setEliminando(null)}>
           <p style={{ fontSize: 13, color: GRIS, marginTop: 0 }}>
-            Esta acción elimina el comprobante y sus ítems, y devuelve el stock vendido al inventario. No se puede deshacer.
+            Esta acción revierte la venta: elimina el comprobante y sus ítems, y devuelve el stock vendido al inventario. No se puede deshacer.
           </p>
-          <Campo label="Contraseña especial de eliminación">
+          <Campo label="Contraseña especial">
             <input type="password" style={inputStyle} value={passwordInput} onChange={e => setPasswordInput(e.target.value)} placeholder="Contraseña" autoFocus />
           </Campo>
           {errorPass && <div style={{ color: ROJO, fontSize: 12.5, marginTop: -8, marginBottom: 10 }}>{errorPass}</div>}
           <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
             <BtnSecondary onClick={() => setEliminando(null)}>Cancelar</BtnSecondary>
-            <Btn onClick={confirmarEliminar} disabled={borrando} style={{ background: ROJO }}>{borrando ? 'Eliminando...' : 'Eliminar definitivamente'}</Btn>
+            <Btn onClick={confirmarEliminar} disabled={borrando} style={{ background: ROJO }}>{borrando ? 'Revirtiendo...' : 'Revertir venta'}</Btn>
           </div>
         </Modal>
       )}
@@ -656,7 +714,18 @@ function Trazabilidad({ importaciones, onRefresh }) {
   const [editandoCosto, setEditandoCosto] = useState(null)
   const [costoVal, setCostoVal] = useState('')
   const [saving, setSaving] = useState(false)
+  const [editandoItem, setEditandoItem] = useState(null)
+  const [itemForm, setItemForm] = useState({})
+  const [integrando, setIntegrando] = useState(false)
+  const [categorias, setCategorias] = useState([])
+  const [categoriaElegida, setCategoriaElegida] = useState('')
+  const [savingIntegrar, setSavingIntegrar] = useState(false)
   const lote = importaciones[0]
+
+  useEffect(() => {
+    fetch('/api/categorias').then(r => r.json()).then(d => { if (Array.isArray(d)) setCategorias(d) })
+  }, [])
+
   if (!lote) return <div style={{ color: GRIS }}>No hay importaciones registradas</div>
 
   const totalCompra = lote.importacion_items?.reduce((s, i) => s + i.precio_compra_unit_usd * i.cantidad, 0) || 0
@@ -685,6 +754,35 @@ function Trazabilidad({ importaciones, onRefresh }) {
 
   const ESTADOS = ['orden_compra','en_transito','en_aduana','en_inventario','distribuido']
   const ESTADO_LABELS = { orden_compra:'Orden de compra', en_transito:'En tránsito', en_aduana:'En aduana', en_inventario:'En inventario', distribuido:'Distribuido' }
+  const pendientesIntegrar = (lote.importacion_items || []).filter(i => !i.producto_id).length
+
+  async function guardarItem() {
+    setSaving(true)
+    await fetch('/api/importaciones', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: editandoItem, descripcion: itemForm.descripcion, cantidad: parseFloat(itemForm.cantidad), precio_compra_unit_usd: parseFloat(itemForm.precio_compra_unit_usd) }),
+    })
+    setSaving(false)
+    setEditandoItem(null)
+    onRefresh()
+  }
+
+  async function confirmarIntegrar() {
+    if (!categoriaElegida) { alert('Elige una categoría'); return }
+    setSavingIntegrar(true)
+    const res = await fetch('/api/importaciones/integrar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lote_id: lote.id, categoria_id: parseInt(categoriaElegida) }),
+    })
+    const data = await res.json()
+    setSavingIntegrar(false)
+    if (!res.ok) { alert(data.error || 'No se pudo integrar'); return }
+    setIntegrando(false)
+    alert(`${data.creados} producto(s) agregados al inventario.`)
+    onRefresh()
+  }
 
   return (
     <div>
@@ -695,9 +793,14 @@ function Trazabilidad({ importaciones, onRefresh }) {
       <div style={{ background: '#fff', border: `1px solid ${BORDE}`, borderRadius: 8, padding: 18, marginBottom: 18 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
           <h3 style={{ fontSize: 15, margin: 0 }}>Lote {lote.codigo_lote}</h3>
-          <span style={{ fontSize: 11, fontWeight: 'bold', padding: '4px 10px', borderRadius: 20, background: logisticaCompleta ? '#E1F0E3' : '#FCEFD9', color: logisticaCompleta ? VERDE : AMBER }}>
-            {ESTADO_LABELS[lote.estado] || lote.estado}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {logisticaCompleta && pendientesIntegrar > 0 && (
+              <BtnSmall onClick={() => { setIntegrando(true); setCategoriaElegida('') }}>Integrar a inventario ({pendientesIntegrar})</BtnSmall>
+            )}
+            <span style={{ fontSize: 11, fontWeight: 'bold', padding: '4px 10px', borderRadius: 20, background: logisticaCompleta ? '#E1F0E3' : '#FCEFD9', color: logisticaCompleta ? VERDE : AMBER }}>
+              {ESTADO_LABELS[lote.estado] || lote.estado}
+            </span>
+          </div>
         </div>
         <p style={{ fontSize: 12, color: GRIS, marginBottom: 14 }}>17 ítems · Origen: Australia · Destino: Trujillo</p>
         <div style={{ marginBottom: 10 }}>
@@ -727,7 +830,7 @@ function Trazabilidad({ importaciones, onRefresh }) {
         <div style={{ maxHeight: 400, overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead><tr style={{ background: '#F7F6F4' }}>
-              {['Código','Descripción','Cant.','Precio unit.','Total compra','Puesto en depo'].map(h => <Th key={h}>{h}</Th>)}
+              {['Código','Descripción','Cant.','Precio unit.','Total compra','Puesto en depo','Estado',''].map(h => <Th key={h}>{h}</Th>)}
             </tr></thead>
             <tbody>
               {lote.importacion_items?.map(item => {
@@ -744,6 +847,8 @@ function Trazabilidad({ importaciones, onRefresh }) {
                     <Td right>{fmtUSD(item.precio_compra_unit_usd)}</Td>
                     <Td right>{fmtUSD(totalItem)}</Td>
                     <Td right>{costoDepo ? <strong>{fmtUSD(costoDepo)}</strong> : <Badge color={AMBER}>Falta logística</Badge>}</Td>
+                    <Td>{item.producto_id ? <Badge color={VERDE}>Integrado</Badge> : <Badge color={AMBER}>Pendiente</Badge>}</Td>
+                    <Td><span onClick={() => { setEditandoItem(item.id); setItemForm({ descripcion: item.descripcion, cantidad: item.cantidad, precio_compra_unit_usd: item.precio_compra_unit_usd }) }} style={{ cursor: 'pointer', color: NARANJA, fontSize: 11.5, fontWeight: 'bold' }}>Editar</span></Td>
                   </tr>
                 )
               })}
@@ -757,6 +862,38 @@ function Trazabilidad({ importaciones, onRefresh }) {
           <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
             <BtnSecondary onClick={() => setEditandoCosto(null)}>Cancelar</BtnSecondary>
             <Btn onClick={guardarCosto} disabled={saving}>{saving ? 'Guardando...' : 'Guardar'}</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {editandoItem && (
+        <Modal title="Editar ítem del lote" onClose={() => setEditandoItem(null)}>
+          <Campo label="Descripción"><input style={inputStyle} value={itemForm.descripcion || ''} onChange={e => setItemForm({...itemForm, descripcion: e.target.value})} /></Campo>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Campo label="Cantidad"><input type="number" style={inputStyle} value={itemForm.cantidad ?? ''} onChange={e => setItemForm({...itemForm, cantidad: e.target.value})} /></Campo>
+            <Campo label="Precio compra unit. (USD)"><input type="number" style={inputStyle} value={itemForm.precio_compra_unit_usd ?? ''} onChange={e => setItemForm({...itemForm, precio_compra_unit_usd: e.target.value})} /></Campo>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+            <BtnSecondary onClick={() => setEditandoItem(null)}>Cancelar</BtnSecondary>
+            <Btn onClick={guardarItem} disabled={saving}>{saving ? 'Guardando...' : 'Guardar cambios'}</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {integrando && (
+        <Modal title="Integrar a inventario" onClose={() => setIntegrando(false)}>
+          <p style={{ fontSize: 13, color: GRIS, marginTop: 0 }}>
+            Se van a crear {pendientesIntegrar} producto(s) nuevos en Inventario, con el costo puesto en depósito ya calculado. El precio de venta quedará vacío para completarlo después.
+          </p>
+          <Campo label="Categoría para estos productos">
+            <select style={inputStyle} value={categoriaElegida} onChange={e => setCategoriaElegida(e.target.value)}>
+              <option value="">Selecciona una categoría...</option>
+              {categorias.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </select>
+          </Campo>
+          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+            <BtnSecondary onClick={() => setIntegrando(false)}>Cancelar</BtnSecondary>
+            <Btn onClick={confirmarIntegrar} disabled={savingIntegrar}>{savingIntegrar ? 'Integrando...' : 'Integrar'}</Btn>
           </div>
         </Modal>
       )}
